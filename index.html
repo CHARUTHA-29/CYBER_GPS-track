@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Global Track System</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root { --bg:#04090e; --line:#0f4a5c; --cy:#37e6ff; --am:#ffd166; --txt:#bfe9f5; --muted:#6d9cab; }
+* { box-sizing: border-box; }
+html, body { margin:0; height:100%; background:var(--bg); color:var(--txt); font-family:Consolas,'Courier New',monospace; font-size:13px; }
+body { display:grid; grid-template-rows:56px 1fr 170px; height:100vh; overflow:hidden; }
+.top { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:0 16px; background:#06121a; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+.brand { font-size:18px; letter-spacing:3px; font-weight:bold; }
+.brand span { color:var(--cy); }
+.clocks { display:flex; gap:14px; font-size:12px; }
+.clocks b { color:var(--am); font-weight:normal; }
+.stats { display:flex; gap:14px; align-items:center; }
+.stats small { display:block; font-size:10px; color:var(--muted); }
+.stats b { font-size:16px; color:var(--cy); font-weight:normal; }
+button { background:transparent; border:1px solid var(--cy); color:var(--cy); padding:6px 10px; cursor:pointer; font-family:inherit; font-size:12px; }
+button:hover { background:#0b2a36; }
+.grid { display:grid; grid-template-columns:270px 1fr 270px; min-height:0; overflow:hidden; }
+.panel { padding:10px 12px; overflow-y:auto; background:linear-gradient(180deg,#071a24,#050d13); }
+.left { border-right:1px solid var(--line); }
+.right { border-left:1px solid var(--line); }
+.map-wrap { position:relative; min-height:0; }
+#map { position:absolute; inset:0; background:#02060a; }
+.leaflet-container { background:#02060a; font-family:inherit; }
+.legend { position:absolute; left:10px; top:10px; z-index:500; background:rgba(6,18,26,.85); border:1px solid var(--line); padding:6px 10px; font-size:11px; line-height:1.6; }
+.c-cy { color:var(--cy); }
+.c-am { color:var(--am); }
+.footer { border-top:1px solid var(--line); padding:8px 12px; overflow-y:auto; background:#050d13; }
+h3 { font-size:11px; letter-spacing:2px; color:var(--cy); margin:12px 0 6px; padding-bottom:4px; border-bottom:1px solid var(--line); font-weight:normal; }
+.panel h3:first-child { margin-top:0; }
+.bars { display:flex; align-items:flex-end; gap:2px; height:70px; }
+.bars.short { height:50px; }
+.bars i { flex:1; background:var(--cy); height:20%; opacity:.8; transition:height .5s ease; }
+table { width:100%; border-collapse:collapse; font-size:11px; }
+th, td { padding:4px 3px; border-bottom:1px solid #0d2a35; text-align:left; white-space:nowrap; }
+th { color:var(--muted); font-weight:normal; }
+tbody tr { cursor:pointer; }
+tbody tr:hover, tbody tr.sel { background:#0b2a36; }
+.st-climb { color:var(--am); }
+.st-cruise { color:var(--cy); }
+.st-desc { color:#ff8a9a; }
+.gauges { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; text-align:center; }
+.ring { width:56px; height:56px; margin:0 auto; border-radius:50%; background:conic-gradient(var(--cy) calc(var(--p) * 1%), #0b2a36 0); position:relative; }
+.ring::after { content:''; position:absolute; inset:7px; border-radius:50%; background:#06131a; }
+.ring-val { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; z-index:1; font-size:11px; color:var(--cy); }
+.gauge { position:relative; }
+.gauge small { font-size:10px; display:block; margin-top:4px; color:var(--muted); }
+.target { font-size:12px; line-height:1.8; }
+.target b { color:var(--am); font-weight:normal; }
+.target .big { font-size:20px; color:var(--cy); }
+#wave { width:100%; height:80px; display:block; }
+.cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:8px; }
+.card { border:1px solid var(--line); padding:6px 8px; font-size:11px; line-height:1.6; }
+.card b { color:var(--cy); font-weight:normal; }
+.plane-icon { background:none; border:none; }
+.pl { color:#7ff5ff; filter:drop-shadow(0 0 4px #00e5ff); width:18px; height:18px; }
+.pl svg { width:18px; height:18px; display:block; }
+.leaflet-tooltip.tip { background:#06121a; border:1px solid var(--cy); color:var(--cy); font-family:inherit; font-size:11px; box-shadow:none; }
+.leaflet-tooltip.tip::before { display:none; }
+@media (max-width:900px) {
+  html, body { height:auto; overflow:auto; }
+  body { display:block; }
+  .grid { grid-template-columns:1fr; overflow:visible; }
+  .map-wrap { height:60vh; order:-1; }
+  .panel { overflow:visible; border:0; border-top:1px solid var(--line); }
+  .top { padding:8px 12px; }
+  .footer { overflow:visible; }
+}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">GLOBAL <span>TRACK SYS</span></div>
+  <div class="clocks" id="clocks"></div>
+  <div class="stats">
+    <div><small>ACTIVE</small><b id="stActive">0</b></div>
+    <div><small>FEED</small><b id="stFeed">SIM</b></div>
+    <button id="liveBtn">OPENSKY: OFF</button>
+  </div>
+</header>
+
+<main class="grid">
+  <aside class="panel left">
+    <h3>NETWORK TRAFFIC</h3>
+    <div class="bars" id="traffic"></div>
+    <h3>RADAR ROSTER</h3>
+    <table>
+      <thead><tr><th>CALLSIGN</th><th>ALT</th><th>SPD</th><th>STATUS</th></tr></thead>
+      <tbody id="roster"></tbody>
+    </table>
+    <h3>CONTINENTAL SCAN</h3>
+    <div class="gauges" id="gauges"></div>
+  </aside>
+
+  <section class="map-wrap">
+    <div id="map"></div>
+    <div class="legend">
+      <div>&#9679; <span class="c-cy">Hub</span></div>
+      <div>&#9992; <span class="c-cy">Simulated aircraft</span></div>
+      <div>&#9679; <span class="c-am">OpenSky live</span></div>
+    </div>
+  </section>
+
+  <aside class="panel right">
+    <h3>TARGET DATA</h3>
+    <div class="target" id="target">Map එකේ aircraft එකක් click කරන්න.</div>
+    <h3>SIGNAL TRANSMISSION</h3>
+    <canvas id="wave"></canvas>
+    <h3>S-BAND</h3>
+    <div class="bars short" id="sband"></div>
+  </aside>
+</main>
+
+<footer class="footer">
+  <h3>AIRCRAFT TRACK</h3>
+  <div class="cards" id="cards"></div>
+</footer>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const CITIES = {
+  NYC:[40.71,-74.01], LON:[51.5,-0.12], PAR:[48.86,2.35], MOS:[55.75,37.62],
+  CAI:[30.04,31.24], DXB:[25.2,55.27], DEL:[28.61,77.21], CMB:[6.93,79.86],
+  SIN:[1.35,103.82], HKG:[22.32,114.17], TYO:[35.68,139.69], SYD:[-33.87,151.21],
+  LAX:[34.05,-118.24], SAO:[-23.55,-46.63], JNB:[-26.2,28.04]
+};
+const ROUTES = [
+  ['NYC','LON'], ['LON','DXB'], ['DXB','SIN'], ['SIN','TYO'], ['LAX','TYO'],
+  ['SAO','JNB'], ['CAI','DEL'], ['CMB','DXB'], ['MOS','PAR'], ['SYD','SIN'],
+  ['HKG','LAX'], ['NYC','SAO'], ['JNB','DXB'], ['DEL','SIN']
+];
+const CLOCK_ZONES = { LON:'Europe/London', NYC:'America/New_York', DEL:'Asia/Kolkata', TYO:'Asia/Tokyo', SYD:'Australia/Sydney' };
+const CALLSIGNS = ['UAE','BAW','SIA','QFA','DLH','CPA','ETD','AIC','THY','QTR','KLM','AAL'];
+const OPENSKY_URL = 'https://opensky-network.org/api/states/all';
+const LIVE_INTERVAL_MS = 20000;
+
+const rnd = n => Math.floor(Math.random() * n);
+const $ = id => document.getElementById(id);
+const fmt = n => Number(n).toLocaleString();
+
+function fixLng(a, b) {
+  let lng = b[1];
+  while (lng - a[1] > 180) lng -= 360;
+  while (lng - a[1] < -180) lng += 360;
+  return [b[0], lng];
+}
+function arcAt(a, b, t) {
+  const dist = Math.hypot(b[0]-a[0], b[1]-a[1]);
+  const bulge = Math.min(14, dist * 0.15);
+  return [a[0] + (b[0]-a[0])*t + Math.sin(Math.PI*t)*bulge, a[1] + (b[1]-a[1])*t];
+}
+function bearing(from, to) {
+  return Math.atan2(to[1]-from[1], to[0]-from[0]) * 180 / Math.PI;
+}
+
+// ---------- Map ----------
+const map = L.map('map', { zoomControl:false, minZoom:2, maxZoom:6, worldCopyJump:true }).setView([25,20], 2);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  subdomains:'abcd', maxZoom:6, attribution:'&copy; OpenStreetMap &copy; CARTO'
+}).addTo(map);
+L.control.zoom({ position:'bottomright' }).addTo(map);
+
+const routeLayer = L.layerGroup().addTo(map);
+const planeLayer = L.layerGroup().addTo(map);
+const liveLayer = L.layerGroup().addTo(map);
+
+for (const [code, pos] of Object.entries(CITIES)) {
+  L.circleMarker(pos, { radius:3, color:'#4fe3ff', fillColor:'#4fe3ff', fillOpacity:1, weight:0 })
+   .bindTooltip(code, { className:'tip' }).addTo(map);
+}
+
+ROUTES.forEach(([ca, cb]) => {
+  const a = CITIES[ca], b = fixLng(a, CITIES[cb]);
+  const pts = [];
+  for (let i = 0; i <= 60; i++) pts.push(arcAt(a, b, i/60));
+  L.polyline(pts, { color:'#1fb6d6', weight:1, opacity:0.35, dashArray:'2 4' }).addTo(routeLayer);
+});
+
+// ---------- Simulated aircraft ----------
+const PLANE_SVG = `<svg viewBox="0 0 24 24"><path fill="currentColor" d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z"/></svg>`;
+function planeIcon(hdg) {
+  return L.divIcon({
+    className:'plane-icon',
+    html:`<div class="pl" style="transform:rotate(${hdg}deg)">${PLANE_SVG}</div>`,
+    iconSize:[18,18], iconAnchor:[9,9]
+  });
+}
+function setRotation(marker, hdg) {
+  const el = marker.getElement && marker.getElement();
+  const inner = el && el.querySelector('.pl');
+  if (inner) inner.style.transform = `rotate(${hdg}deg)`;
+}
+
+const flights = [];
+ROUTES.forEach(([ca, cb]) => {
+  for (let k = 0; k < 2; k++) {
+    const a = CITIES[ca], b = fixLng(a, CITIES[cb]);
+    const p = {
+      cs: CALLSIGNS[rnd(CALLSIGNS.length)] + (100 + rnd(900)),
+      from:ca, to:cb, a, b,
+      t: Math.random(),
+      dur: 90 + rnd(120),
+      alt: 28000 + rnd(12000),
+      spd: 780 + rnd(140),
+      pos:a, hdg:0, source:'sim'
+    };
+    p.marker = L.marker(a, { icon:planeIcon(0) }).addTo(planeLayer);
+    p.marker.on('click', () => select(p));
+    flights.push(p);
+  }
+});
+
+// ---------- Live OpenSky ----------
+let liveOn = false, liveList = [], liveTimer = null, feedState = 'SIM';
+let selected = null;
+
+async function fetchLive() {
+  try {
+    const res = await fetch(OPENSKY_URL);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const json = await res.json();
+    liveLayer.clearLayers();
+    liveList = [];
+    (json.states || []).slice(0, 1500).forEach(s => {
+      if (s[5] == null || s[6] == null) return;
+      const ac = {
+        cs:(s[1] || '????????').trim(), from:s[2] || '—', to:'',
+        lng:s[5], lat:s[6], pos:[s[6], s[5]],
+        alt: s[7] != null ? Math.round(s[7] * 3.281) : 0,
+        spd: s[9] != null ? Math.round(s[9] * 3.6) : 0,
+        hdg: s[10] || 0, source:'live'
+      };
+      const m = L.circleMarker(ac.pos, { radius:3, color:'#ffd166', fillColor:'#ffd166', fillOpacity:0.9, weight:0 }).addTo(liveLayer);
+      m.on('click', () => select(ac));
+      ac.marker = m;
+      liveList.push(ac);
+    });
+    feedState = 'OPENSKY';
+  } catch (e) {
+    feedState = 'ERROR';
+  }
+  $('stFeed').textContent = feedState;
+}
+
+$('liveBtn').addEventListener('click', () => {
+  liveOn = !liveOn;
+  $('liveBtn').textContent = 'OPENSKY: ' + (liveOn ? 'ON' : 'OFF');
+  selected = null;
+  renderTarget();
+  if (liveOn) {
+    map.removeLayer(planeLayer);
+    feedState = 'LOADING';
+    $('stFeed').textContent = feedState;
+    fetchLive();
+    liveTimer = setInterval(fetchLive, LIVE_INTERVAL_MS);
+  } else {
+    clearInterval(liveTimer);
+    liveLayer.clearLayers();
+    liveList = [];
+    map.addLayer(planeLayer);
+    feedState = 'SIM';
+    $('stFeed').textContent = feedState;
+  }
+});
+
+// ---------- Panels ----------
+function current() { return liveOn ? liveList : flights; }
+
+function info(o) {
+  if (o.source === 'sim') {
+    return {
+      cs:o.cs, route:`${o.from} → ${o.to}`, alt:Math.round(o.alt), spd:o.spd,
+      hdg:Math.round(o.hdg + 360) % 360, lat:o.pos[0], lng:o.pos[1],
+      status: o.t < 0.15 ? 'CLIMB' : o.t > 0.85 ? 'DESCENT' : 'CRUISE'
+    };
+  }
+  return {
+    cs:o.cs, route:o.from, alt:o.alt, spd:o.spd, hdg:Math.round(o.hdg),
+    lat:o.lat, lng:o.lng,
+    status: o.alt < 3000 ? 'GROUND' : o.alt < 20000 ? 'CLIMB' : 'CRUISE'
+  };
+}
+
+function select(o) { selected = o; renderTarget(); renderRoster(); }
+
+function renderTarget() {
+  const box = $('target');
+  if (!selected) { box.innerHTML = 'Map එකේ aircraft එකක් click කරන්න.'; return; }
+  const d = info(selected);
+  box.innerHTML = `
+    <div class="big">${d.cs}</div>
+    <b>ROUTE</b> ${d.route}<br>
+    <b>STATUS</b> ${d.status}<br>
+    <b>ALTITUDE</b> ${fmt(d.alt)} ft<br>
+    <b>SPEED</b> ${fmt(d.spd)} km/h<br>
+    <b>HEADING</b> ${d.hdg}°<br>
+    <b>LAT</b> ${d.lat.toFixed(3)}<br>
+    <b>LON</b> ${d.lng.toFixed(3)}`;
+}
+
+function renderRoster() {
+  const list = current();
+  $('roster').innerHTML = list.slice(0, 12).map((o, i) => {
+    const d = info(o);
+    const cls = d.status === 'CLIMB' ? 'st-climb' : d.status === 'DESCENT' ? 'st-desc' : 'st-cruise';
+    const sel = selected === o ? ' class="sel"' : '';
+    return `<tr data-i="${i}"${sel}><td>${d.cs}</td><td>${fmt(d.alt)}</td><td>${fmt(d.spd)}</td><td class="${cls}">${d.status}</td></tr>`;
+  }).join('');
+  $('stActive').textContent = fmt(list.length);
+}
+
+$('roster').addEventListener('click', e => {
+  const tr = e.target.closest('tr');
+  if (!tr) return;
+  const o = current()[Number(tr.dataset.i)];
+  if (o) select(o);
+});
+
+function renderCards() {
+  $('cards').innerHTML = current().slice(0, 8).map(o => {
+    const d = info(o);
+    return `<div class="card"><b>${d.cs}</b><br>FROM/TO: ${d.route}<br>ALT ${fmt(d.alt)} ft · ${fmt(d.spd)} km/h<br>HDG ${d.hdg}° · ${d.status}</div>`;
+  }).join('');
+}
+
+function makeBars(id, n) { $(id).innerHTML = Array.from({length:n}, () => '<i></i>').join(''); }
+function animateBars(id) {
+  for (const b of $(id).children) b.style.height = (15 + Math.random()*85).toFixed(0) + '%';
+}
+
+const GAUGE_LABELS = ['CPU','MEM','LINK','UPLINK','GPS','RADAR'];
+function makeGauges() {
+  $('gauges').innerHTML = GAUGE_LABELS.map(l => `
+    <div class="gauge">
+      <div class="ring" id="g-${l}"><span class="ring-val" id="v-${l}">0</span></div>
+      <small>${l}</small>
+    </div>`).join('');
+}
+function animateGauges() {
+  GAUGE_LABELS.forEach(l => {
+    const p = 40 + rnd(60);
+    $('g-' + l).style.setProperty('--p', p);
+    $('v-' + l).textContent = p + '%';
+  });
+}
+
+const wave = $('wave'), wctx = wave.getContext('2d');
+function resizeWave() {
+  const r = wave.getBoundingClientRect();
+  wave.width = r.width * devicePixelRatio;
+  wave.height = r.height * devicePixelRatio;
+  wctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+}
+function drawWave(t) {
+  const w = wave.clientWidth, h = wave.clientHeight;
+  wctx.clearRect(0, 0, w, h);
+  ['#37e6ff','#1fb6d6','#ffd166'].forEach((c, k) => {
+    wctx.beginPath();
+    wctx.strokeStyle = c;
+    wctx.lineWidth = 1.2;
+    for (let x = 0; x <= w; x += 2) {
+      const y = h/2 + Math.sin(x*0.04 + t*0.003*(k+1)) * (h*0.3) * Math.sin(x*0.01 + k);
+      x === 0 ? wctx.moveTo(x, y) : wctx.lineTo(x, y);
+    }
+    wctx.stroke();
+  });
+}
+
+function updateClocks() {
+  const now = new Date();
+  $('clocks').innerHTML = Object.entries(CLOCK_ZONES).map(([code, tz]) => {
+    const time = now.toLocaleTimeString('en-GB', { timeZone:tz, hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    return `${code} <b>${time}</b>`;
+  }).join('&nbsp;&nbsp;');
+}
+
+// ---------- Animation loop ----------
+let last = performance.now(), waveT = 0;
+function frame(now) {
+  const dt = Math.min(0.1, (now - last) / 1000);
+  last = now;
+  waveT += dt * 1000;
+  if (!liveOn) {
+    for (const p of flights) {
+      p.t += dt / p.dur;
+      if (p.t >= 1) p.t = 0;
+      p.pos = arcAt(p.a, p.b, p.t);
+      p.hdg = bearing(p.pos, arcAt(p.a, p.b, Math.min(1, p.t + 0.01)));
+      p.marker.setLatLng(p.pos);
+      setRotation(p.marker, p.hdg);
+    }
+  }
+  drawWave(waveT);
+  requestAnimationFrame(frame);
+}
+
+// ---------- Init ----------
+makeBars('traffic', 40);
+makeBars('sband', 24);
+makeGauges();
+resizeWave();
+window.addEventListener('resize', resizeWave);
+updateClocks();
+animateBars('traffic'); animateBars('sband'); animateGauges();
+renderRoster(); renderCards();
+setInterval(updateClocks, 1000);
+setInterval(() => { renderRoster(); if (selected) renderTarget(); }, 1000);
+setInterval(renderCards, 3000);
+setInterval(() => { animateBars('traffic'); animateBars('sband'); }, 700);
+setInterval(animateGauges, 2000);
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
